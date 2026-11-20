@@ -188,14 +188,14 @@ def back_kb(user_id):
     return kb
 
 
-@bot.message_handler(commands=("start", "game", "chest", "case"))
+@bot.message_handler(commands=list(("start", "game", "chest", "case")))
 def cmd_menu(message):
     user = message.from_user
     coins, _, _, _ = get_user(user)
     bot.send_message(message.chat.id, get_menu_text(user.first_name, coins), reply_markup=main_menu_kb(user.id))
 
 
-@bot.message_handler(commands=("rich",))
+@bot.message_handler(commands=list(("rich",)))
 def cmd_rich(message):
     user = message.from_user
     if is_admin(user):
