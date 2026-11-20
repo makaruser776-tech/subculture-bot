@@ -6,7 +6,6 @@ import time
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-# Бот сам возьмет токен из закрытых настроек BotHost, на GitHub его нет:
 TOKEN = (
     os.getenv("BOT_TOKEN")
     or os.getenv("TELEGRAM_TOKEN")
@@ -175,7 +174,10 @@ def handle_callbacks(call):
 
     if action == "m":
         coins, _, _ = get_user(owner_id)
-        bot.edit_message_text(get_menu_text(call.from_user.first_name, coins), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=main_menu_kb(owner_id))
+        try:
+            bot.edit_message_text(get_menu_text(call.from_user.first_name, coins), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=main_menu_kb(owner_id))
+        except Exception:
+            pass
 
     elif action == "o":
         case_key = parts.pop(0)
@@ -186,20 +188,20 @@ def handle_callbacks(call):
             bot.answer_callback_query(call.id, f"❌ Не хватает монет! Нужно {case['price']} 🪙, а у тебя {coins} 🪙.", show_alert=True)
             return
 
-        coins -= case["price"]
+        new_coins = coins - case["price"]
         rarity = random.choices(RARITY_ORDER, weights=case["weights"], k=1).pop()
         card = random.choice(CARDS[rarity])
 
         card_id = card["id"]
         is_new = card_id not in cards
         cards[card_id] = cards.get(card_id, 0) + 1
-        save_user(owner_id, coins, cards, last_daily)
+        save_user(owner_id, new_coins, cards, last_daily)
 
         status_text = "🆕 <b>НОВАЯ КАРТОЧКА!</b>" if is_new else f"♻️ Дубликат (в шкафу: {cards[card_id]} шт.)"
         emoji = RARITY_EMOJI[rarity]
 
         bot.edit_message_text(
-            f"Ты открыл <b>{case['name']}</b>!\n\n{status_text}\n{emoji} Редкость: <b>{rarity}</b>\n🃏 Карточка: <b>{card['name']}</b>\n📖 <i>{card['desc']}</i>\n\nОстаток на балансе: <b>{coins} 🪙</b>",
+            f"Ты открыл <b>{case['name']}</b>!\n\n{status_text}\n{emoji} Редкость: <b>{rarity}</b>\n🃏 Карточка: <b>{card['name']}</b>\n📖 <i>{card['desc']}</i>\n\nОстаток на балансе: <b>{new_coins} 🪙</b>",
             chat_id=call.message.chat.id,
             message_id=call.message.message_id,
             reply_markup=after_open_kb(case_key, owner_id),
@@ -236,10 +238,14 @@ def handle_callbacks(call):
             bot.answer_callback_query(call.id, f"⏳ Бонус уже получен! Приходи через {left_hours} ч.", show_alert=True)
             return
 
-        coins += DAILY_BONUS
-        save_user(owner_id, coins, cards, now)
-        bot.answer_callback_query(call.id, f"🎁 Получено +{DAILY_BONUS} 🪙! Теперь у тебя {coins} 🪙.", show_alert=True)
-        bot.edit_message_text(get_menu_text(call.from_user.first_name, coins), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=main_menu_kb(owner_id))
+        new_coins = coins + DAILY_BONUS
+        save_user(owner_id, new_coins, cards, now)
+        bot.answer_callback_query(call.id, f"🎁 Получено +{DAILY_BONUS} 🪙! Теперь у тебя {new_coins} 🪙.", show_alert=True)
+
+        try:
+            bot.edit_message_text(get_menu_text(call.from_user.first_name, new_coins), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=main_menu_kb(owner_id))
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
