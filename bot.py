@@ -8,7 +8,13 @@ from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command
 from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
-BOT_TOKEN = os.getenv("BOT_TOKEN") or os.getenv("TOKEN")
+BOT_TOKEN = (
+    os.getenv("BOT_TOKEN")
+    or os.getenv("TELEGRAM_TOKEN")
+    or os.getenv("TOKEN")
+    or os.getenv("API_TOKEN")
+    or ""
+).strip()
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
@@ -252,6 +258,3 @@ async def cb_shelf(callback: types.CallbackQuery):
 
     coins, cards, _ = get_user(owner_id)
     total_cards = sum(len(group) for group in CARDS.values())
-    opened_count = len(cards)
-
-    lines = list()
