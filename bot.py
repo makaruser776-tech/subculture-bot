@@ -19,7 +19,7 @@ ADMIN_USERNAME = "oi_petersburg"
 START_COINS = 100
 DAILY_BONUS = 60
 DAILY_COOLDOWN = 86400
-WORK_COOLDOWN = 1700
+WORK_COOLDOWN = 3600
 
 WORK_EVENTS = (
     "Помог таскать колонки перед локальным гигом",
@@ -235,11 +235,37 @@ def back_kb(user_id):
 
 def shelf_kb(user_id):
     kb = InlineKeyboardMarkup()
+    kb.row(InlineKeyboardButton("🏷 Поставить тег в чате", callback_data=f"t|0|{user_id}"))
     kb.row(
         InlineKeyboardButton("♻️ Продать дубли", callback_data=f"x|{user_id}"),
         InlineKeyboardButton("💸 Продать карту", callback_data=f"p|0|{user_id}"),
     )
     kb.row(InlineKeyboardButton("🔙 Назад в меню", callback_data=f"m|{user_id}"))
+    return kb
+
+
+def tag_list_kb(cards, page, user_id):
+    kb = InlineKeyboardMarkup()
+    owned_ids = list(cards.keys())
+    per_page = 6
+    total_pages = max(1, (len(owned_ids) + per_page - 1) // per_page)
+    page = max(0, min(page, total_pages - 1))
+
+    chunk = owned_ids[page * per_page : (page + 1) * per_page]
+    for cid in chunk:
+        rarity, name = find_card_info(cid)
+        emoji = RARITY_EMOJI[rarity]
+        kb.row(InlineKeyboardButton(f"{emoji} {name}", callback_data=f"g|{cid}|{user_id}"))
+
+    nav = list()
+    if page > 0:
+        nav.append(InlineKeyboardButton("⬅️", callback_data=f"t|{page - 1}|{user_id}"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton("➡️", callback_data=f"t|{page + 1}|{user_id}"))
+    if nav:
+        kb.row(*nav)
+
+    kb.row(InlineKeyboardButton("🔙 В шкаф", callback_data=f"s|{user_id}"))
     return kb
 
 
@@ -269,8 +295,6 @@ def sell_list_kb(cards, page, user_id):
 
     kb.row(InlineKeyboardButton("🔙 В шкаф", callback_data=f"s|{user_id}"))
     return kb
-
-
 @bot.message_handler(commands=list(("start", "game", "chest", "case")))
 def cmd_menu(message):
     user = message.from_user
@@ -290,6 +314,8 @@ def cmd_rich(message):
         _, cards, last_daily, last_work = get_user(user)
         save_user(user, 99999, cards, last_daily, last_work)
         bot.reply_to(message, "💰 Админ-баланс: <b>99999 🪙</b>")
+
+
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
     parts = call.data.split("|")
@@ -367,6 +393,47 @@ def handle_callbacks(call):
                     lines.append(f"{emoji} <b>{rarity}:</b> " + ", ".join(opened_in_rarity))
 
         bot.edit_message_text("\n".join(lines), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=shelf_kb(owner_id))
+
+    elif action == "t":
+        page = int(parts.pop(0))
+        _, cards, _, _ = get_user(user)
+        if not cards:
+            bot.answer_callback_query(call.id, "🗄 Сначала выбей хотя бы одну субкультуру!", show_alert=True)
+            return
+
+        bot.edit_message_text(
+            "🏷 <b>Выбор тега участника</b>\n<i>Нажми на выбитую субкультуру, чтобы поставить её себе в тег в этом чате:</i>",
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            reply_markup=tag_list_kb(cards, page, owner_id),
+        )
+
+    elif action == "g":
+        cid = parts.pop(0)
+        _, cards, _, _ = get_user(user)
+        if cid not in cards or cards[cid] <= 0:
+            bot.answer_callback_query(call.id, "❌ Эта карточка еще не открыта!", show_alert=True)
+            return
+
+        if call.message.chat.type == "private":
+            bot.answer_callback_query(call.id, "❌ Тег можно поставить только в общем чате!", show_alert=True)
+            return
+
+        _, name = find_card_info(cid)
+        tag_text = name[:16]
+        chat_id = call.message.chat.id
+
+        try:
+            member = bot.get_chat_member(chat_id, user.id)
+            if member.status == "creator":
+                bot.answer_callback_query(call.id, "👑 Владельцу чата бот не может менять тег — впиши его себе вручную в настройках админов!", show_alert=True)
+                return
+            if member.status != "administrator":
+                bot.promote_chat_member(chat_id, user.id, can_manage_chat=True)
+            bot.set_chat_administrator_custom_title(chat_id, user.id, tag_text)
+            bot.answer_callback_query(call.id, f"🏷 Готово! Твой новый тег в чате: {tag_text}", show_alert=True)
+        except Exception:
+            bot.answer_callback_query(call.id, "❌ Не вышло поставить тег. Проверь, что группа — супергруппа, а у бота включено право «Добавление админов»!", show_alert=True)
 
     elif action == "p":
         page = int(parts.pop(0))
@@ -465,25 +532,21 @@ def handle_callbacks(call):
         now = int(time.time())
 
         if now - last_work < WORK_COOLDOWN:
-            left_mins = int((WORK_COOLDOWN - (now - last_work)) / 60) + 1
-            hours = left_mins // 60
-            mins = left_mins % 60
-            wait_str = f"{hours} ч. {mins} мин." if hours > 0 else f"{mins} мин."
-            bot.answer_callback_query(call.id, f"⏳ Отдохни еще {wait_str}", show_alert=True)
-            return
-
-        earned = random.randint(15, 25)
-        event = random.choice(WORK_EVENTS)
-        new_coins = 99999 if is_admin(user) else (coins + earned)
-        save_user(user, new_coins, cards, last_daily, now)
-        bot.answer_callback_query(call.id, f"🎸 {event}!\n+{earned} 🪙", show_alert=True)
-
-        try:
-            bot.edit_message_text(get_menu_text(user.first_name, new_coins), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=main_menu_kb(owner_id))
-        except Exception:
-            pass
-
-
-if __name__ == "__main__":
-    bot.remove_webhook()
-    bot.infinity_polling(skip_pending=True)
+left_mins = int((WORK_COOLDOWN - (now - last_work)) / 60) + 1
+hours = left_mins // 60
+mins = left_mins % 60
+wait_str = f"{hours} ч. {mins} мин." if hours > 0 else f"{mins} мин."
+bot.answer_callback_query(call.id, f"⏳ Отдохни еще {wait_str}", show_alert=True)
+return
+earned = random.randint(15, 25)
+event = random.choice(WORK_EVENTS)
+new_coins = 99999 if is_admin(user) else (coins + earned)
+save_user(user, new_coins, cards, last_daily, now)
+bot.answer_callback_query(call.id, f"🎸 {event}!\n+{earned} 🪙", show_alert=True)
+try:
+bot.edit_message_text(get_menu_text(user.first_name, new_coins), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=main_menu_kb(owner_id))
+except Exception:
+pass
+if name == "main":
+bot.remove_webhook()
+bot.infinity_polling(skip_pending=True)
