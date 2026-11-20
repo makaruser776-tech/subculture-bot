@@ -1,31 +1,25 @@
-import asyncio
 import json
 import os
 import random
 import sqlite3
 import time
-from aiogram import Bot, Dispatcher, F, types
-from aiogram.filters import Command
-from aiogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+import telebot
+from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
 
-BOT_TOKEN = (
+# Бот сам возьмет токен из закрытых настроек BotHost, на GitHub его нет:
+TOKEN = (
     os.getenv("BOT_TOKEN")
     or os.getenv("TELEGRAM_TOKEN")
     or os.getenv("TOKEN")
-    or os.getenv("API_TOKEN")
     or ""
 ).strip()
 
-bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
-
-# --- НАСТРОЙКИ ИГРЫ ---
+bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
 
 START_COINS = 100
 DAILY_BONUS = 60
 DAILY_COOLDOWN = 86400
 
-# 4 вида кейсов: цена, описание и шансы (Обычная, Редкая, Эпическая, Легендарная)
 CASES = {
     "street": {
         "name": "📦 Уличный кейс",
@@ -53,7 +47,6 @@ CASES = {
     },
 }
 
-# 18 карточек по 4 редкостям
 CARDS = {
     "Обычная": (
         {"id": "metal", "name": "Металлист", "desc": "Косухи, мерч тяжелых групп, длинные волосы, тяжелый рок и метал."},
@@ -84,177 +77,171 @@ CARDS = {
 }
 
 RARITY_ORDER = ("Обычная", "Редкая", "Эпическая", "Легендарная")
-RARITY_EMOJI = {
-    "Обычная": "⚪️",
-    "Редкая": "🔵",
-    "Эпическая": "🟣",
-    "Легендарная": "🟡",
-}
-
-# --- БАЗА ДАННЫХ ---
-
-conn = sqlite3.connect("game.db")
-cursor = conn.cursor()
-cursor.execute("""
-    CREATE TABLE IF NOT EXISTS users (
-        user_id INTEGER PRIMARY KEY,
-        coins INTEGER,
-        cards TEXT,
-        last_daily INTEGER DEFAULT 0
-    )
-""")
-conn.commit()
+RARITY_EMOJI = {"Обычная": "⚪️", "Редкая": "🔵", "Эпическая": "🟣", "Легендарная": "🟡"}
 
 
-def get_user(user_id: int):
+def init_db():
+    conn = sqlite3.connect("game.db")
+    cursor = conn.cursor()
+    cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, coins INTEGER, cards TEXT, last_daily INTEGER DEFAULT 0)")
+    conn.commit()
+    conn.close()
+
+
+init_db()
+
+
+def get_user(user_id):
+    conn = sqlite3.connect("game.db")
+    cursor = conn.cursor()
     cursor.execute("SELECT coins, cards, last_daily FROM users WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
     if not row:
-        cursor.execute(
-            "INSERT INTO users (user_id, coins, cards, last_daily) VALUES (?, ?, ?, ?)",
-            (user_id, START_COINS, "{}", 0),
-        )
+        cursor.execute("INSERT INTO users (user_id, coins, cards, last_daily) VALUES (?, ?, ?, ?)", (user_id, START_COINS, "{}", 0))
         conn.commit()
+        conn.close()
         return START_COINS, {}, 0
+    conn.close()
     coins, cards_json, last_daily = row
     return coins, json.loads(cards_json), last_daily
 
 
-def save_user(user_id: int, coins: int, cards: dict, last_daily: int):
-    cursor.execute(
-        "UPDATE users SET coins = ?, cards = ?, last_daily = ? WHERE user_id = ?",
-        (coins, json.dumps(cards), last_daily, user_id),
-    )
+def save_user(user_id, coins, cards, last_daily):
+    conn = sqlite3.connect("game.db")
+    cursor = conn.cursor()
+    cursor.execute("UPDATE users SET coins = ?, cards = ?, last_daily = ? WHERE user_id = ?", (coins, json.dumps(cards), last_daily, user_id))
     conn.commit()
-
-
-# --- КЛАВИАТУРЫ И ТЕКСТЫ ---
-
-def get_menu_text(name: str, coins: int) -> str:
+    conn.close()
+def get_menu_text(name, coins):
     lines = list()
     lines.append(f"🎲 <b>Кейсы субкультур</b> | Игрок: <b>{name}</b>")
     lines.append(f"💰 Твой баланс: <b>{coins} 🪙</b>\n")
     for c in CASES.values():
         w0, w1, w2, w3 = c["weights"]
-        lines.append(
-            f"<b>{c['name']} — {c['price']} 🪙</b>\n"
-            f"<i>{c['desc']}</i>\n"
-            f"Шансы: ⚪️{w0}% | 🔵{w1}% | 🟣{w2}% | 🟡{w3}%\n"
-        )
+        lines.append(f"<b>{c['name']} — {c['price']} 🪙</b>\n<i>{c['desc']}</i>\nШансы: ⚪️{w0}% | 🔵{w1}% | 🟣{w2}% | 🟡{w3}%\n")
     return "\n".join(lines)
 
 
-def main_menu_kb(user_id: int):
-    rows = list()
-    rows.append((
-        InlineKeyboardButton(text=f"📦 Уличный ({CASES['street']['price']} 🪙)", callback_data=f"open:street:{user_id}"),
-        InlineKeyboardButton(text=f"🎸 Клубный ({CASES['club']['price']} 🪙)", callback_data=f"open:club:{user_id}"),
-    ))
-    rows.append((
-        InlineKeyboardButton(text=f"📻 Винтажный ({CASES['vintage']['price']} 🪙)", callback_data=f"open:vintage:{user_id}"),
-        InlineKeyboardButton(text=f"👑 Архивный ({CASES['legend']['price']} 🪙)", callback_data=f"open:legend:{user_id}"),
-    ))
-    rows.append((
-        InlineKeyboardButton(text="🗄 Мой шкаф", callback_data=f"shelf:{user_id}"),
-        InlineKeyboardButton(text="🎁 Бонус дня", callback_data=f"daily:{user_id}"),
-    ))
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+def main_menu_kb(user_id):
+    kb = InlineKeyboardMarkup()
+    kb.row(
+        InlineKeyboardButton(f"📦 Уличный ({CASES['street']['price']} 🪙)", callback_data=f"o|street|{user_id}"),
+        InlineKeyboardButton(f"🎸 Клубный ({CASES['club']['price']} 🪙)", callback_data=f"o|club|{user_id}"),
+    )
+    kb.row(
+        InlineKeyboardButton(f"📻 Винтажный ({CASES['vintage']['price']} 🪙)", callback_data=f"o|vintage|{user_id}"),
+        InlineKeyboardButton(f"👑 Архивный ({CASES['legend']['price']} 🪙)", callback_data=f"o|legend|{user_id}"),
+    )
+    kb.row(
+        InlineKeyboardButton("🗄 Мой шкаф", callback_data=f"s|{user_id}"),
+        InlineKeyboardButton("🎁 Бонус дня", callback_data=f"d|{user_id}"),
+    )
+    return kb
 
 
-def after_open_kb(case_key: str, user_id: int):
+def after_open_kb(case_key, user_id):
     case = CASES[case_key]
-    rows = list()
-    rows.append((
-        InlineKeyboardButton(text=f"🔄 Открыть еще ({case['price']} 🪙)", callback_data=f"open:{case_key}:{user_id}"),
-    ))
-    rows.append((
-        InlineKeyboardButton(text="🗄 Мой шкаф", callback_data=f"shelf:{user_id}"),
-        InlineKeyboardButton(text="🔙 Все кейсы", callback_data=f"menu:{user_id}"),
-    ))
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    kb = InlineKeyboardMarkup()
+    kb.row(InlineKeyboardButton(f"🔄 Открыть еще ({case['price']} 🪙)", callback_data=f"o|{case_key}|{user_id}"))
+    kb.row(
+        InlineKeyboardButton("🗄 Мой шкаф", callback_data=f"s|{user_id}"),
+        InlineKeyboardButton("🔙 Все кейсы", callback_data=f"m|{user_id}"),
+    )
+    return kb
 
 
-def back_kb(user_id: int):
-    rows = list()
-    rows.append((
-        InlineKeyboardButton(text="🔙 Назад к кейсам", callback_data=f"menu:{user_id}"),
-    ))
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+def back_kb(user_id):
+    kb = InlineKeyboardMarkup()
+    kb.row(InlineKeyboardButton("🔙 Назад к кейсам", callback_data=f"m|{user_id}"))
+    return kb
 
 
-# --- ОБРАБОТЧИКИ ---
-
-@dp.message(Command("start", "game", "chest", "case"))
-async def cmd_menu(message: types.Message):
+@bot.message_handler(commands=("start", "game", "chest", "case"))
+def cmd_menu(message):
     user_id = message.from_user.id
     coins, _, _ = get_user(user_id)
-    await message.answer(
-        get_menu_text(message.from_user.first_name, coins),
-        reply_markup=main_menu_kb(user_id),
-        parse_mode="HTML",
-    )
+    bot.send_message(message.chat.id, get_menu_text(message.from_user.first_name, coins), reply_markup=main_menu_kb(user_id))
 
 
-@dp.callback_query(F.data.startswith("menu:"))
-async def cb_menu(callback: types.CallbackQuery):
-    parts = callback.data.split(":")
-    owner_id = int(parts.pop())
-    if callback.from_user.id != owner_id:
-        return await callback.answer("❌ Это не твое меню! Напиши /case чтобы открыть свое.", show_alert=True)
+@bot.callback_query_handler(func=lambda call: True)
+def handle_callbacks(call):
+    parts = call.data.split("|")
+    action = parts.pop(0)
+    owner_id = int(parts.pop(-1))
 
-    coins, _, _ = get_user(owner_id)
-    await callback.message.edit_text(
-        get_menu_text(callback.from_user.first_name, coins),
-        reply_markup=main_menu_kb(owner_id),
-        parse_mode="HTML",
-    )
+    if call.from_user.id != owner_id:
+        bot.answer_callback_query(call.id, "❌ Это не твое меню! Напиши /case чтобы открыть свое.", show_alert=True)
+        return
+
+    if action == "m":
+        coins, _, _ = get_user(owner_id)
+        bot.edit_message_text(get_menu_text(call.from_user.first_name, coins), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=main_menu_kb(owner_id))
+
+    elif action == "o":
+        case_key = parts.pop(0)
+        case = CASES[case_key]
+        coins, cards, last_daily = get_user(owner_id)
+
+        if coins < case["price"]:
+            bot.answer_callback_query(call.id, f"❌ Не хватает монет! Нужно {case['price']} 🪙, а у тебя {coins} 🪙.", show_alert=True)
+            return
+
+        coins -= case["price"]
+        rarity = random.choices(RARITY_ORDER, weights=case["weights"], k=1).pop()
+        card = random.choice(CARDS[rarity])
+
+        card_id = card["id"]
+        is_new = card_id not in cards
+        cards[card_id] = cards.get(card_id, 0) + 1
+        save_user(owner_id, coins, cards, last_daily)
+
+        status_text = "🆕 <b>НОВАЯ КАРТОЧКА!</b>" if is_new else f"♻️ Дубликат (в шкафу: {cards[card_id]} шт.)"
+        emoji = RARITY_EMOJI[rarity]
+
+        bot.edit_message_text(
+            f"Ты открыл <b>{case['name']}</b>!\n\n{status_text}\n{emoji} Редкость: <b>{rarity}</b>\n🃏 Карточка: <b>{card['name']}</b>\n📖 <i>{card['desc']}</i>\n\nОстаток на балансе: <b>{coins} 🪙</b>",
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            reply_markup=after_open_kb(case_key, owner_id),
+        )
+
+    elif action == "s":
+        coins, cards, _ = get_user(owner_id)
+        total_cards = sum(len(group) for group in CARDS.values())
+        opened_count = len(cards)
+
+        lines = list()
+        lines.append(f"🗄 <b>Коллекционный шкаф ({call.from_user.first_name})</b>")
+        lines.append(f"Собрано: <b>{opened_count} из {total_cards}</b> | Баланс: <b>{coins} 🪙</b>\n")
+
+        for rarity in RARITY_ORDER:
+            emoji = RARITY_EMOJI[rarity]
+            lines.append(f"<b>{emoji} — {rarity} —</b>")
+            for card in CARDS[rarity]:
+                count = cards.get(card["id"], 0)
+                if count > 0:
+                    lines.append(f"✅ {card['name']} (x{count})")
+                else:
+                    lines.append("🔒 ???")
+            lines.append("")
+
+        bot.edit_message_text("\n".join(lines), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=back_kb(owner_id))
+
+    elif action == "d":
+        coins, cards, last_daily = get_user(owner_id)
+        now = int(time.time())
+
+        if now - last_daily < DAILY_COOLDOWN:
+            left_hours = round((DAILY_COOLDOWN - (now - last_daily)) / 3600, 1)
+            bot.answer_callback_query(call.id, f"⏳ Бонус уже получен! Приходи через {left_hours} ч.", show_alert=True)
+            return
+
+        coins += DAILY_BONUS
+        save_user(owner_id, coins, cards, now)
+        bot.answer_callback_query(call.id, f"🎁 Получено +{DAILY_BONUS} 🪙! Теперь у тебя {coins} 🪙.", show_alert=True)
+        bot.edit_message_text(get_menu_text(call.from_user.first_name, coins), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=main_menu_kb(owner_id))
 
 
-@dp.callback_query(F.data.startswith("open:"))
-async def cb_open_case(callback: types.CallbackQuery):
-    _, case_key, owner_id_str = callback.data.split(":")
-    owner_id = int(owner_id_str)
-
-    if callback.from_user.id != owner_id:
-        return await callback.answer("❌ Не трогай чужой кейс! Вызови свой командой /case", show_alert=True)
-
-    case = CASES[case_key]
-    coins, cards, last_daily = get_user(owner_id)
-
-    if coins < case["price"]:
-        return await callback.answer(f"❌ Не хватает монет! Нужно {case['price']} 🪙, а у тебя {coins} 🪙.", show_alert=True)
-
-    coins -= case["price"]
-
-    rarity = random.choices(RARITY_ORDER, weights=case["weights"], k=1).pop()
-    card = random.choice(CARDS[rarity])
-
-    card_id = card["id"]
-    is_new = card_id not in cards
-    cards[card_id] = cards.get(card_id, 0) + 1
-    save_user(owner_id, coins, cards, last_daily)
-
-    status_text = "🆕 <b>НОВАЯ КАРТОЧКА!</b>" if is_new else f"♻️ Дубликат (в шкафу: {cards[card_id]} шт.)"
-    emoji = RARITY_EMOJI[rarity]
-
-    await callback.message.edit_text(
-        f"Ты открыл <b>{case['name']}</b>!\n\n"
-        f"{status_text}\n"
-        f"{emoji} Редкость: <b>{rarity}</b>\n"
-        f"🃏 Карточка: <b>{card['name']}</b>\n"
-        f"📖 <i>{card['desc']}</i>\n\n"
-        f"Остаток на балансе: <b>{coins} 🪙</b>",
-        reply_markup=after_open_kb(case_key, owner_id),
-        parse_mode="HTML",
-    )
-
-
-@dp.callback_query(F.data.startswith("shelf:"))
-async def cb_shelf(callback: types.CallbackQuery):
-    parts = callback.data.split(":")
-    owner_id = int(parts.pop())
-    if callback.from_user.id != owner_id:
-        return await callback.answer("❌ Это чужой шкаф! Открой свой через /case", show_alert=True)
-
-    coins, cards, _ = get_user(owner_id)
-    total_cards = sum(len(group) for group in CARDS.values())
+if __name__ == "__main__":
+    bot.remove_webhook()
+    bot.infinity_polling(skip_pending=True)
