@@ -175,6 +175,8 @@ def save_user(user, coins, cards, last_daily, last_work):
     cursor.execute("UPDATE users SET coins = ?, cards = ?, last_daily = ?, last_work = ? WHERE user_id = ?", (coins, json.dumps(cards), last_daily, last_work, user.id))
     conn.commit()
     conn.close()
+
+
 def get_menu_text(name, coins):
     return (
         f"🎲 <b>Кейсы субкультур</b> | {name}\n"
@@ -188,350 +190,290 @@ def get_info_text():
     lines.append("ℹ️ <b>Шансы и скупка карточек:</b>\n")
     for c in CASES.values():
         w0, w1, w2, w3 = c["weights"]
-        lines.append(f"<b>{c['name']} ({c['price']} 🪙)</b> — {c['desc']}\n⚪️{w0}% | 🔵{w1}% | 🟣{w2}% | 🟡{w3}%\n")
-    lines.append("♻️ <b>Дубли:</b> ⚪️5 🪙 | 🔵12 🪙 | 🟣25 🪙 | 🟡50 🪙")
-    lines.append("💸 <b>Обычная продажа:</b> ⚪️2 🪙 | 🔵6 🪙 | 🟣12 🪙 | 🟡25 🪙")
-    return "\n".join(lines)
-
-
+lines.append(f"{c['name']} ({c['price']} 🪙) — {c['desc']}\n⚪️{w0}% | 🔵{w1}% | 🟣{w2}% | 🟡{w3}%\n")
+lines.append("♻️ Дубли: ⚪️5 🪙 | 🔵12 🪙 | 🟣25 🪙 | 🟡50 🪙")
+lines.append("💸 Обычная продажа: ⚪️2 🪙 | 🔵6 🪙 | 🟣12 🪙 | 🟡25 🪙")
+return "\n".join(lines)
 def main_menu_kb(user_id):
-    kb = InlineKeyboardMarkup()
-    kb.row(
-        InlineKeyboardButton(f"📦 Уличный ({CASES['street']['price']} 🪙)", callback_data=f"o|street|{user_id}"),
-        InlineKeyboardButton(f"🎸 Клубный ({CASES['club']['price']} 🪙)", callback_data=f"o|club|{user_id}"),
-    )
-    kb.row(
-        InlineKeyboardButton(f"📻 Винтажный ({CASES['vintage']['price']} 🪙)", callback_data=f"o|vintage|{user_id}"),
-        InlineKeyboardButton(f"👑 Архивный ({CASES['legend']['price']} 🪙)", callback_data=f"o|legend|{user_id}"),
-    )
-    kb.row(
-        InlineKeyboardButton("🗄 Шкаф", callback_data=f"s|{user_id}"),
-        InlineKeyboardButton("🎁 Бонус", callback_data=f"d|{user_id}"),
-        InlineKeyboardButton("ℹ️ Шансы", callback_data=f"i|{user_id}"),
-    )
-    kb.row(
-        InlineKeyboardButton("🎸 Потусить (+15..25 🪙)", callback_data=f"w|{user_id}"),
-        InlineKeyboardButton("♻️ Продать дубли", callback_data=f"x|{user_id}"),
-    )
-    return kb
-
-
+kb = InlineKeyboardMarkup()
+kb.row(
+InlineKeyboardButton(f"📦 Уличный ({CASES['street']['price']} 🪙)", callback_data=f"o|street|{user_id}"),
+InlineKeyboardButton(f"🎸 Клубный ({CASES['club']['price']} 🪙)", callback_data=f"o|club|{user_id}"),
+)
+kb.row(
+InlineKeyboardButton(f"📻 Винтажный ({CASES['vintage']['price']} 🪙)", callback_data=f"o|vintage|{user_id}"),
+InlineKeyboardButton(f"👑 Архивный ({CASES['legend']['price']} 🪙)", callback_data=f"o|legend|{user_id}"),
+)
+kb.row(
+InlineKeyboardButton("🗄 Шкаф", callback_data=f"s|{user_id}"),
+InlineKeyboardButton("🎁 Бонус", callback_data=f"d|{user_id}"),
+InlineKeyboardButton("ℹ️ Шансы", callback_data=f"i|{user_id}"),
+)
+kb.row(
+InlineKeyboardButton("🎸 Потусить (+15..25 🪙)", callback_data=f"w|{user_id}"),
+InlineKeyboardButton("♻️ Продать дубли", callback_data=f"x|{user_id}"),
+)
+return kb
 def after_open_kb(case_key, user_id):
-    case = CASES[case_key]
-    kb = InlineKeyboardMarkup()
-    kb.row(InlineKeyboardButton(f"🔄 Еще ({case['price']} 🪙)", callback_data=f"o|{case_key}|{user_id}"))
-    kb.row(
-        InlineKeyboardButton("🗄 Шкаф", callback_data=f"s|{user_id}"),
-        InlineKeyboardButton("🔙 Меню", callback_data=f"m|{user_id}"),
-    )
-    return kb
-
-
+case = CASES[case_key]
+kb = InlineKeyboardMarkup()
+kb.row(InlineKeyboardButton(f"🔄 Еще ({case['price']} 🪙)", callback_data=f"o|{case_key}|{user_id}"))
+kb.row(
+InlineKeyboardButton("🗄 Шкаф", callback_data=f"s|{user_id}"),
+InlineKeyboardButton("🔙 Меню", callback_data=f"m|{user_id}"),
+)
+return kb
 def back_kb(user_id):
-    kb = InlineKeyboardMarkup()
-    kb.row(InlineKeyboardButton("🔙 Назад", callback_data=f"m|{user_id}"))
-    return kb
-
-
+kb = InlineKeyboardMarkup()
+kb.row(InlineKeyboardButton("🔙 Назад", callback_data=f"m|{user_id}"))
+return kb
 def shelf_kb(user_id):
-    kb = InlineKeyboardMarkup()
-    kb.row(InlineKeyboardButton("🏷 Поставить тег в чате", callback_data=f"t|0|{user_id}"))
-    kb.row(
-        InlineKeyboardButton("♻️ Продать дубли", callback_data=f"x|{user_id}"),
-        InlineKeyboardButton("💸 Продать карту", callback_data=f"p|0|{user_id}"),
-    )
-    kb.row(InlineKeyboardButton("🔙 Назад в меню", callback_data=f"m|{user_id}"))
-    return kb
-
-
+kb = InlineKeyboardMarkup()
+kb.row(InlineKeyboardButton("🏷 Поставить тег в чате", callback_data=f"t|0|{user_id}"))
+kb.row(
+InlineKeyboardButton("♻️ Продать дубли", callback_data=f"x|{user_id}"),
+InlineKeyboardButton("💸 Продать карту", callback_data=f"p|0|{user_id}"),
+)
+kb.row(InlineKeyboardButton("🔙 Назад в меню", callback_data=f"m|{user_id}"))
+return kb
 def tag_list_kb(cards, page, user_id):
-    kb = InlineKeyboardMarkup()
-    owned_ids = list(cards.keys())
-    per_page = 6
-    total_pages = max(1, (len(owned_ids) + per_page - 1) // per_page)
-    page = max(0, min(page, total_pages - 1))
-
-    chunk = owned_ids[page * per_page : (page + 1) * per_page]
-    for cid in chunk:
-        rarity, name = find_card_info(cid)
-        emoji = RARITY_EMOJI[rarity]
-        kb.row(InlineKeyboardButton(f"{emoji} {name}", callback_data=f"g|{cid}|{user_id}"))
-
-    nav = list()
-    if page > 0:
-        nav.append(InlineKeyboardButton("⬅️", callback_data=f"t|{page - 1}|{user_id}"))
-    if page < total_pages - 1:
-        nav.append(InlineKeyboardButton("➡️", callback_data=f"t|{page + 1}|{user_id}"))
-    if nav:
-        kb.row(*nav)
-
-    kb.row(InlineKeyboardButton("🔙 В шкаф", callback_data=f"s|{user_id}"))
-    return kb
-
-
+kb = InlineKeyboardMarkup()
+owned_ids = list(cards.keys())
+per_page = 6
+total_pages = max(1, (len(owned_ids) + per_page - 1) // per_page)
+page = max(0, min(page, total_pages - 1))
+chunk = owned_ids[page * per_page : (page + 1) * per_page]
+for cid in chunk:
+rarity, name = find_card_info(cid)
+emoji = RARITY_EMOJI[rarity]
+kb.row(InlineKeyboardButton(f"{emoji} {name}", callback_data=f"g|{cid}|{user_id}"))
+nav = list()
+if page > 0:
+nav.append(InlineKeyboardButton("⬅️", callback_data=f"t|{page - 1}|{user_id}"))
+if page < total_pages - 1:
+nav.append(InlineKeyboardButton("➡️", callback_data=f"t|{page + 1}|{user_id}"))
+if nav:
+kb.row(*nav)
+kb.row(InlineKeyboardButton("🔙 В шкаф", callback_data=f"s|{user_id}"))
+return kb
 def sell_list_kb(cards, page, user_id):
-    kb = InlineKeyboardMarkup()
-    owned_ids = list(cards.keys())
-    per_page = 6
-    total_pages = max(1, (len(owned_ids) + per_page - 1) // per_page)
-    page = max(0, min(page, total_pages - 1))
-
-    chunk = owned_ids[page * per_page : (page + 1) * per_page]
-    for cid in chunk:
-        rarity, name = find_card_info(cid)
-        emoji = RARITY_EMOJI[rarity]
-        count = cards[cid]
-        price = DUP_PRICES[rarity] if count > 1 else SINGLE_PRICES[rarity]
-        tag = "дубль" if count > 1 else "последняя"
-        kb.row(InlineKeyboardButton(f"{emoji} {name} (x{count}, {tag}) — +{price} 🪙", callback_data=f"c|{cid}|{page}|{user_id}"))
-
-    nav = list()
-    if page > 0:
-        nav.append(InlineKeyboardButton("⬅️", callback_data=f"p|{page - 1}|{user_id}"))
-    if page < total_pages - 1:
-        nav.append(InlineKeyboardButton("➡️", callback_data=f"p|{page + 1}|{user_id}"))
-    if nav:
-        kb.row(*nav)
-
-    kb.row(InlineKeyboardButton("🔙 В шкаф", callback_data=f"s|{user_id}"))
-    return kb
+kb = InlineKeyboardMarkup()
+owned_ids = list(cards.keys())
+per_page = 6
+total_pages = max(1, (len(owned_ids) + per_page - 1) // per_page)
+page = max(0, min(page, total_pages - 1))
+chunk = owned_ids[page * per_page : (page + 1) * per_page]
+for cid in chunk:
+rarity, name = find_card_info(cid)
+emoji = RARITY_EMOJI[rarity]
+count = cards[cid]
+price = DUP_PRICES[rarity] if count > 1 else SINGLE_PRICES[rarity]
+tag = "дубль" if count > 1 else "последняя"
+kb.row(InlineKeyboardButton(f"{emoji} {name} (x{count}, {tag}) — +{price} 🪙", callback_data=f"c|{cid}|{page}|{user_id}"))
+nav = list()
+if page > 0:
+nav.append(InlineKeyboardButton("⬅️", callback_data=f"p|{page - 1}|{user_id}"))
+if page < total_pages - 1:
+nav.append(InlineKeyboardButton("➡️", callback_data=f"p|{page + 1}|{user_id}"))
+if nav:
+kb.row(*nav)
+kb.row(InlineKeyboardButton("🔙 В шкаф", callback_data=f"s|{user_id}"))
+return kb
 @bot.message_handler(commands=list(("start", "game", "chest", "case")))
 def cmd_menu(message):
-    user = message.from_user
-    if message.chat.type != "private":
-        try:
-            bot.delete_message(message.chat.id, message.message_id)
-        except Exception:
-            pass
-    coins, _, _, _ = get_user(user)
-    bot.send_message(message.chat.id, get_menu_text(user.first_name, coins), reply_markup=main_menu_kb(user.id))
-
-
+user = message.from_user
+if message.chat.type != "private":
+try:
+bot.delete_message(message.chat.id, message.message_id)
+except Exception:
+pass
+coins, _, _, _ = get_user(user)
+bot.send_message(message.chat.id, get_menu_text(user.first_name, coins), reply_markup=main_menu_kb(user.id))
 @bot.message_handler(commands=list(("rich",)))
 def cmd_rich(message):
-    user = message.from_user
-    if is_admin(user):
-        _, cards, last_daily, last_work = get_user(user)
-        save_user(user, 99999, cards, last_daily, last_work)
-        bot.reply_to(message, "💰 Админ-баланс: <b>99999 🪙</b>")
-
-
+user = message.from_user
+if is_admin(user):
+_, cards, last_daily, last_work = get_user(user)
+save_user(user, 99999, cards, last_daily, last_work)
+bot.reply_to(message, "💰 Админ-баланс: 99999 🪙")
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
-    parts = call.data.split("|")
-    action = parts.pop(0)
-    owner_id = int(parts.pop(-1))
-    user = call.from_user
-
-    if user.id != owner_id:
-        bot.answer_callback_query(call.id, "❌ Это не твое меню! Напиши /case чтобы открыть свое.", show_alert=True)
-        return
-
-    if action == "m":
-        coins, _, _, _ = get_user(user)
-        try:
-            bot.edit_message_text(get_menu_text(user.first_name, coins), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=main_menu_kb(owner_id))
-        except Exception:
-            pass
-
-    elif action == "i":
-        try:
-            bot.edit_message_text(get_info_text(), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=back_kb(owner_id))
-        except Exception:
-            pass
-
-    elif action == "o":
-        case_key = parts.pop(0)
-        case = CASES[case_key]
-        coins, cards, last_daily, last_work = get_user(user)
-
-        if coins < case["price"]:
-            bot.answer_callback_query(call.id, f"❌ Не хватает монет! Нужно {case['price']} 🪙, а у тебя {coins} 🪙.", show_alert=True)
-            return
-
-        new_coins = 99999 if is_admin(user) else (coins - case["price"])
-        rarity = random.choices(RARITY_ORDER, weights=case["weights"], k=1).pop()
-        card = random.choice(CARDS[rarity])
-
-        card_id = card["id"]
-        is_new = card_id not in cards
-        cards[card_id] = cards.get(card_id, 0) + 1
-        save_user(user, new_coins, cards, last_daily, last_work)
-
-        status_text = "🆕 <b>НОВАЯ!</b>" if is_new else f"♻️ Дубль (x{cards[card_id]})"
-        emoji = RARITY_EMOJI[rarity]
-
-        bot.edit_message_text(
-            f"<b>{case['name']}</b> | {status_text}\n"
-            f"{emoji} {rarity}: <b>{card['name']}</b>\n"
-            f"<i>{card['desc']}</i>\n"
-            f"💰 Баланс: <b>{new_coins} 🪙</b>",
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            reply_markup=after_open_kb(case_key, owner_id),
-        )
-
-    elif action == "s":
-        coins, cards, _, _ = get_user(user)
-        total_cards = sum(len(group) for group in CARDS.values())
-        opened_count = len(cards)
-
-        lines = list()
-        lines.append(f"🗄 <b>Шкаф {user.first_name}</b> ({opened_count}/{total_cards}) | 💰 {coins} 🪙\n")
-
-        if opened_count == 0:
-            lines.append("<i>Пока пусто — открой первый кейс!</i>")
-        else:
-            for rarity in RARITY_ORDER:
-                emoji = RARITY_EMOJI[rarity]
-                opened_in_rarity = list()
-                for card in CARDS[rarity]:
-                    count = cards.get(card["id"], 0)
-                    if count > 0:
-                        opened_in_rarity.append(f"{card['name']} (x{count})")
-                if opened_in_rarity:
-                    lines.append(f"{emoji} <b>{rarity}:</b> " + ", ".join(opened_in_rarity))
-
-        bot.edit_message_text("\n".join(lines), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=shelf_kb(owner_id))
-
-    elif action == "t":
-        page = int(parts.pop(0))
-        _, cards, _, _ = get_user(user)
-        if not cards:
-            bot.answer_callback_query(call.id, "🗄 Сначала выбей хотя бы одну субкультуру!", show_alert=True)
-            return
-
-        bot.edit_message_text(
-            "🏷 <b>Выбор тега участника</b>\n<i>Нажми на выбитую субкультуру, чтобы поставить её себе в тег в этом чате:</i>",
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            reply_markup=tag_list_kb(cards, page, owner_id),
-        )
-
-    elif action == "g":
-        cid = parts.pop(0)
-        _, cards, _, _ = get_user(user)
-        if cid not in cards or cards[cid] <= 0:
-            bot.answer_callback_query(call.id, "❌ Эта карточка еще не открыта!", show_alert=True)
-            return
-
-        if call.message.chat.type == "private":
-            bot.answer_callback_query(call.id, "❌ Тег можно поставить только в общем чате!", show_alert=True)
-            return
-
-        _, name = find_card_info(cid)
-        tag_text = name[:16]
-        chat_id = call.message.chat.id
-
-        try:
-            member = bot.get_chat_member(chat_id, user.id)
-            if member.status == "creator":
-                bot.answer_callback_query(call.id, "👑 Владельцу чата бот не может менять тег — впиши его себе вручную в настройках админов!", show_alert=True)
-                return
-            if member.status != "administrator":
-                bot.promote_chat_member(chat_id, user.id, can_manage_chat=True)
-            bot.set_chat_administrator_custom_title(chat_id, user.id, tag_text)
-            bot.answer_callback_query(call.id, f"🏷 Готово! Твой новый тег в чате: {tag_text}", show_alert=True)
-        except Exception:
-            bot.answer_callback_query(call.id, "❌ Не вышло поставить тег. Проверь, что группа — супергруппа, а у бота включено право «Добавление админов»!", show_alert=True)
-
-    elif action == "p":
-        page = int(parts.pop(0))
-        coins, cards, _, _ = get_user(user)
-        if not cards:
-            bot.answer_callback_query(call.id, "🗄 В шкафу пока нет ни одной карточки!", show_alert=True)
-            return
-
-        bot.edit_message_text(
-            f"💸 <b>Продажа карточек</b> | 💰 {coins} 🪙\n"
-            f"<i>Дубли идут по полной цене, последняя карта в коллекции — дешевле:</i>",
-            chat_id=call.message.chat.id,
-            message_id=call.message.message_id,
-            reply_markup=sell_list_kb(cards, page, owner_id),
-        )
-
-    elif action == "c":
-        cid = parts.pop(0)
-        page = int(parts.pop(0))
-        coins, cards, last_daily, last_work = get_user(user)
-
-        if cid not in cards or cards[cid] <= 0:
-            bot.answer_callback_query(call.id, "❌ Такой карточки уже нет!", show_alert=True)
-            return
-
-        rarity, name = find_card_info(cid)
-        count = cards[cid]
-        price = DUP_PRICES[rarity] if count > 1 else SINGLE_PRICES[rarity]
-
-        if count > 1:
-            cards[cid] = count - 1
-        else:
-            del cards[cid]
-
-        new_coins = 99999 if is_admin(user) else (coins + price)
-        save_user(user, new_coins, cards, last_daily, last_work)
-        bot.answer_callback_query(call.id, f"💸 Продано: {name} (+{price} 🪙)", show_alert=True)
-
-        if not cards:
-            bot.edit_message_text(get_menu_text(user.first_name, new_coins), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=main_menu_kb(owner_id))
-        else:
-            bot.edit_message_text(
-                f"💸 <b>Продажа карточек</b> | 💰 {new_coins} 🪙\n"
-                f"<i>Дубли идут по полной цене, последняя карта в коллекции — дешевле:</i>",
-                chat_id=call.message.chat.id,
-                message_id=call.message.message_id,
-                reply_markup=sell_list_kb(cards, page, owner_id),
-            )
-
-    elif action == "x":
-        coins, cards, last_daily, last_work = get_user(user)
-        sold_count = 0
-        earned = 0
-
-        for card_id, count in list(cards.items()):
-            if count > 1:
-                dups = count - 1
-                rarity, _ = find_card_info(card_id)
-                earned += dups * DUP_PRICES.get(rarity, 5)
-                sold_count += dups
-                cards[card_id] = 1
-
-        if sold_count == 0:
-            bot.answer_callback_query(call.id, "♻️ Повторок нет! Если хочешь продать обычную карту, нажми «💸 Продать карту» в шкафу.", show_alert=True)
-            return
-
-        new_coins = 99999 if is_admin(user) else (coins + earned)
-        save_user(user, new_coins, cards, last_daily, last_work)
-        bot.answer_callback_query(call.id, f"♻️ Продано повторок: {sold_count} шт. (+{earned} 🪙)", show_alert=True)
-
-        try:
-            bot.edit_message_text(get_menu_text(user.first_name, new_coins), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=main_menu_kb(owner_id))
-        except Exception:
-            pass
-
-    elif action == "d":
-        coins, cards, last_daily, last_work = get_user(user)
-        now = int(time.time())
-
-        if now - last_daily < DAILY_COOLDOWN:
-            left_hours = round((DAILY_COOLDOWN - (now - last_daily)) / 3600, 1)
-            bot.answer_callback_query(call.id, f"⏳ Бонус уже получен! Приходи через {left_hours} ч.", show_alert=True)
-            return
-
-        new_coins = 99999 if is_admin(user) else (coins + DAILY_BONUS)
-        save_user(user, new_coins, cards, now, last_work)
-        bot.answer_callback_query(call.id, f"🎁 +{DAILY_BONUS} 🪙! Баланс: {new_coins} 🪙.", show_alert=True)
-
-        try:
-            bot.edit_message_text(get_menu_text(user.first_name, new_coins), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=main_menu_kb(owner_id))
-        except Exception:
-            pass
-
-    elif action == "w":
-        coins, cards, last_daily, last_work = get_user(user)
-        now = int(time.time())
-
-        if now - last_work < WORK_COOLDOWN:
+parts = call.data.split("|")
+action = parts.pop(0)
+owner_id = int(parts.pop(-1))
+user = call.from_user
+if user.id != owner_id:
+bot.answer_callback_query(call.id, "❌ Это не твое меню! Напиши /case чтобы открыть свое.", show_alert=True)
+return
+if action == "m":
+coins, _, _, _ = get_user(user)
+try:
+bot.edit_message_text(get_menu_text(user.first_name, coins), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=main_menu_kb(owner_id))
+except Exception:
+pass
+elif action == "i":
+try:
+bot.edit_message_text(get_info_text(), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=back_kb(owner_id))
+except Exception:
+pass
+elif action == "o":
+case_key = parts.pop(0)
+case = CASES[case_key]
+coins, cards, last_daily, last_work = get_user(user)
+if coins < case["price"]:
+bot.answer_callback_query(call.id, f"❌ Не хватает монет! Нужно {case['price']} 🪙, а у тебя {coins} 🪙.", show_alert=True)
+return
+new_coins = 99999 if is_admin(user) else (coins - case["price"])
+rarity = random.choices(RARITY_ORDER, weights=case["weights"], k=1).pop()
+card = random.choice(CARDS[rarity])
+card_id = card["id"]
+is_new = card_id not in cards
+cards[card_id] = cards.get(card_id, 0) + 1
+save_user(user, new_coins, cards, last_daily, last_work)
+status_text = "🆕 НОВАЯ!" if is_new else f"♻️ Дубль (x{cards[card_id]})"
+emoji = RARITY_EMOJI[rarity]
+bot.edit_message_text(
+f"{case['name']} | {status_text}\n"
+f"{emoji} {rarity}: {card['name']}\n"
+f"{card['desc']}\n"
+f"💰 Баланс: {new_coins} 🪙",
+chat_id=call.message.chat.id,
+message_id=call.message.message_id,
+reply_markup=after_open_kb(case_key, owner_id),
+)
+elif action == "s":
+coins, cards, _, _ = get_user(user)
+total_cards = sum(len(group) for group in CARDS.values())
+opened_count = len(cards)
+lines = list()
+lines.append(f"🗄 Шкаф {user.first_name} ({opened_count}/{total_cards}) | 💰 {coins} 🪙\n")
+if opened_count == 0:
+lines.append("Пока пусто — открой первый кейс!")
+else:
+for rarity in RARITY_ORDER:
+emoji = RARITY_EMOJI[rarity]
+opened_in_rarity = list()
+for card in CARDS[rarity]:
+count = cards.get(card["id"], 0)
+if count > 0:
+opened_in_rarity.append(f"{card['name']} (x{count})")
+if opened_in_rarity:
+lines.append(f"{emoji} {rarity}: " + ", ".join(opened_in_rarity))
+bot.edit_message_text("\n".join(lines), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=shelf_kb(owner_id))
+elif action == "t":
+page = int(parts.pop(0))
+_, cards, _, _ = get_user(user)
+if not cards:
+bot.answer_callback_query(call.id, "🗄 Сначала выбей хотя бы одну субкультуру!", show_alert=True)
+return
+bot.edit_message_text(
+"🏷 Выбор тега участника\nНажми на выбитую субкультуру, чтобы поставить её себе в тег в этом чате:",
+chat_id=call.message.chat.id,
+message_id=call.message.message_id,
+reply_markup=tag_list_kb(cards, page, owner_id),
+)
+elif action == "g":
+cid = parts.pop(0)
+_, cards, _, _ = get_user(user)
+if cid not in cards or cards[cid] <= 0:
+bot.answer_callback_query(call.id, "❌ Эта карточка еще не открыта!", show_alert=True)
+return
+if call.message.chat.type == "private":
+bot.answer_callback_query(call.id, "❌ Тег можно поставить только в общем чате!", show_alert=True)
+return
+_, name = find_card_info(cid)
+tag_text = name[:16]
+chat_id = call.message.chat.id
+try:
+member = bot.get_chat_member(chat_id, user.id)
+if member.status == "creator":
+bot.answer_callback_query(call.id, "👑 Владельцу чата бот не может менять тег — впиши его себе вручную в настройках админов!", show_alert=True)
+return
+if member.status != "administrator":
+bot.promote_chat_member(chat_id, user.id, can_manage_chat=True)
+bot.set_chat_administrator_custom_title(chat_id, user.id, tag_text)
+bot.answer_callback_query(call.id, f"🏷 Готово! Твой новый тег в чате: {tag_text}", show_alert=True)
+except Exception:
+bot.answer_callback_query(call.id, "❌ Не вышло поставить тег. Проверь, что группа — супергруппа, а у бота включено право «Добавление админов»!", show_alert=True)
+elif action == "p":
+page = int(parts.pop(0))
+coins, cards, _, _ = get_user(user)
+if not cards:
+bot.answer_callback_query(call.id, "🗄 В шкафу пока нет ни одной карточки!", show_alert=True)
+return
+bot.edit_message_text(
+f"💸 Продажа карточек | 💰 {coins} 🪙\n"
+f"Дубли идут по полной цене, последняя карта в коллекции — дешевле:",
+chat_id=call.message.chat.id,
+message_id=call.message.message_id,
+reply_markup=sell_list_kb(cards, page, owner_id),
+)
+elif action == "c":
+cid = parts.pop(0)
+page = int(parts.pop(0))
+coins, cards, last_daily, last_work = get_user(user)
+if cid not in cards or cards[cid] <= 0:
+bot.answer_callback_query(call.id, "❌ Такой карточки уже нет!", show_alert=True)
+return
+rarity, name = find_card_info(cid)
+count = cards[cid]
+price = DUP_PRICES[rarity] if count > 1 else SINGLE_PRICES[rarity]
+if count > 1:
+cards[cid] = count - 1
+else:
+del cards[cid]
+new_coins = 99999 if is_admin(user) else (coins + price)
+save_user(user, new_coins, cards, last_daily, last_work)
+bot.answer_callback_query(call.id, f"💸 Продано: {name} (+{price} 🪙)", show_alert=True)
+if not cards:
+bot.edit_message_text(get_menu_text(user.first_name, new_coins), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=main_menu_kb(owner_id))
+else:
+bot.edit_message_text(
+f"💸 Продажа карточек | 💰 {new_coins} 🪙\n"
+f"Дубли идут по полной цене, последняя карта в коллекции — дешевле:",
+chat_id=call.message.chat.id,
+message_id=call.message.message_id,
+reply_markup=sell_list_kb(cards, page, owner_id),
+)
+elif action == "x":
+coins, cards, last_daily, last_work = get_user(user)
+sold_count = 0
+earned = 0
+for card_id, count in list(cards.items()):
+if count > 1:
+dups = count - 1
+rarity, _ = find_card_info(card_id)
+earned += dups * DUP_PRICES.get(rarity, 5)
+sold_count += dups
+cards[card_id] = 1
+if sold_count == 0:
+bot.answer_callback_query(call.id, "♻️ Повторок нет! Если хочешь продать обычную карту, нажми «💸 Продать карту» в шкафу.", show_alert=True)
+return
+new_coins = 99999 if is_admin(user) else (coins + earned)
+save_user(user, new_coins, cards, last_daily, last_work)
+bot.answer_callback_query(call.id, f"♻️ Продано повторок: {sold_count} шт. (+{earned} 🪙)", show_alert=True)
+try:
+bot.edit_message_text(get_menu_text(user.first_name, new_coins), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=main_menu_kb(owner_id))
+except Exception:
+pass
+elif action == "d":
+coins, cards, last_daily, last_work = get_user(user)
+now = int(time.time())
+if now - last_daily < DAILY_COOLDOWN:
+left_hours = round((DAILY_COOLDOWN - (now - last_daily)) / 3600, 1)
+bot.answer_callback_query(call.id, f"⏳ Бонус уже получен! Приходи через {left_hours} ч.", show_alert=True)
+return
+new_coins = 99999 if is_admin(user) else (coins + DAILY_BONUS)
+save_user(user, new_coins, cards, now, last_work)
+bot.answer_callback_query(call.id, f"🎁 +{DAILY_BONUS} 🪙! Баланс: {new_coins} 🪙.", show_alert=True)
+try:
+bot.edit_message_text(get_menu_text(user.first_name, new_coins), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=main_menu_kb(owner_id))
+except Exception:
+pass
+elif action == "w":
+coins, cards, last_daily, last_work = get_user(user)
+now = int(time.time())
+if now - last_work < WORK_COOLDOWN:
 left_mins = int((WORK_COOLDOWN - (now - last_work)) / 60) + 1
 hours = left_mins // 60
 mins = left_mins % 60
