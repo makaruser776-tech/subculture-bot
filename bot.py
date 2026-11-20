@@ -15,11 +15,11 @@ TOKEN = (
 
 bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
 
-ADMIN_USERNAME = "Oi_PETERSBURG"
+ADMIN_USERNAME = "oi_petersburg"
 START_COINS = 100
 DAILY_BONUS = 60
 DAILY_COOLDOWN = 86400
-WORK_COOLDOWN = 10800  # 3 часа в секундах
+WORK_COOLDOWN = 3600
 
 WORK_EVENTS = (
     "Помог таскать колонки перед локальным гигом",
@@ -106,7 +106,9 @@ init_db()
 
 
 def is_admin(user):
-    return bool(user.username and user.username.lower() == ADMIN_USERNAME.lower())
+    if user and user.username and user.username.lower() == ADMIN_USERNAME:
+        return True
+    return False
 
 
 def get_user(user):
@@ -191,6 +193,15 @@ def cmd_menu(message):
     user = message.from_user
     coins, _, _, _ = get_user(user)
     bot.send_message(message.chat.id, get_menu_text(user.first_name, coins), reply_markup=main_menu_kb(user.id))
+
+
+@bot.message_handler(commands=("rich",))
+def cmd_rich(message):
+    user = message.from_user
+    if is_admin(user):
+        _, cards, last_daily, last_work = get_user(user)
+        save_user(user, 99999, cards, last_daily, last_work)
+        bot.reply_to(message, "💰 Админ-баланс активирован: <b>99999 🪙</b>")
 
 
 @bot.callback_query_handler(func=lambda call: True)
