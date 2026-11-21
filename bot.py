@@ -2,6 +2,7 @@ import json
 import os
 import random
 import sqlite3
+import threading
 import time
 import telebot
 from telebot.types import InlineKeyboardMarkup, InlineKeyboardButton
@@ -13,7 +14,7 @@ TOKEN = (
     or ""
 ).strip()
 
-bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
+bot = telebot.TeleBot(TOKEN, parse_mode="HTML", num_threads=8)
 
 DATA_DIR = os.getenv("DATA_DIR", ".")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -26,6 +27,28 @@ DAILY_COOLDOWN = 86400
 WORK_COOLDOWN = 900
 
 PENDING_GIFTS = {}
+LAST_CLICK = {}
+MSG_TIMERS = {}
+
+
+def touch_message(chat_id, message_id, delay=600):
+    key = (chat_id, message_id)
+    old_timer = MSG_TIMERS.pop(key, None)
+    if old_timer:
+        old_timer.cancel()
+
+    def _delete():
+        MSG_TIMERS.pop(key, None)
+        try:
+            bot.delete_message(chat_id, message_id)
+        except Exception:
+            pass
+
+    t = threading.Timer(delay, _delete)
+    t.daemon = True
+    t.start()
+    MSG_TIMERS[key] = t
+
 
 WORK_EVENTS = (
     "Помог таскать колонки перед локальным гигом",
@@ -62,7 +85,6 @@ CASES = {
         "weights": (0, 15, 45, 40),
     },
 }
-
 CARDS = {
     "Обычная": (
         {"id": "metal", "name": "Металлист", "desc": "Косухи, мерч тяжелых групп, длинные волосы, тяжелый рок и метал."},
@@ -120,8 +142,6 @@ RARITY_EMOJI = {"Обычная": "⚪️", "Редкая": "🔵", "Эпиче�
 
 DUP_PRICES = {"Обычная": 5, "Редкая": 12, "Эпическая": 25, "Легендарная": 50}
 SINGLE_PRICES = {"Обычная": 2, "Редкая": 6, "Эпическая": 12, "Легендарная": 25}
-
-
 def find_card_info(card_id):
     for rarity, group in CARDS.items():
         for card in group:
@@ -133,6 +153,8 @@ def find_card_info(card_id):
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    cursor.execute("PRAGMA journal_mode=WAL;")
+    cursor.execute("PRAGMA synchronous=NORMAL;")
     cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT, first_name TEXT, coins INTEGER, cards TEXT, last_daily INTEGER DEFAULT 0, last_work INTEGER DEFAULT 0)")
     for col in ("username TEXT", "first_name TEXT", "last_work INTEGER DEFAULT 0"):
         try:
@@ -396,7 +418,8 @@ def cmd_menu(message):
         except Exception:
             pass
     coins, _, _, _ = get_user(user)
-    bot.send_message(message.chat.id, get_menu_text(user.first_name, coins), reply_markup=main_menu_kb(user.id))
+    msg = bot.send_message(message.chat.id, get_menu_text(user.first_name, coins), reply_markup=main_menu_kb(user.id))
+    touch_message(msg.chat.id, msg.message_id)
 
 
 @bot.message_handler(commands=list(("rich",)))
@@ -405,7 +428,8 @@ def cmd_rich(message):
     if is_admin(user):
         _, cards, last_daily, last_work = get_user(user)
         save_user(user, 99999, cards, last_daily, last_work)
-        bot.reply_to(message, "💰 Админ-баланс: <b>99999 🪙</b>")
+        msg = bot.reply_to(message, "💰 Админ-баланс: <b>99999 🪙</b>")
+        touch_message(msg.chat.id, msg.message_id)
 
 
 @bot.message_handler(func=lambda m: m.from_user and m.from_user.id in PENDING_GIFTS)
@@ -425,15 +449,18 @@ def handle_gift_target(message):
                 break
 
     if not target_user and not target_username:
-        bot.reply_to(message, "❌ Передача отменена. Нужно было отправить <code>@username</code> друга или ответить (Reply) на его сообщение.")
+        msg = bot.reply_to(message, "❌ Передача отменена. Нужно было отправить <code>@username</code> друга или ответить (Reply) на его сообщение.")
+        touch_message(msg.chat.id, msg.message_id)
         return
 
     if target_user and target_user.is_bot:
-        bot.reply_to(message, "❌ Ботам нельзя дарить карточки!")
+        msg = bot.reply_to(message, "❌ Ботам нельзя дарить карточки!")
+        touch_message(msg.chat.id, msg.message_id)
         return
 
     _, res_text = transfer_card(sender, target_user, target_username, cid)
-    bot.reply_to(message, res_text)
+    msg = bot.reply_to(message, res_text)
+    touch_message(msg.chat.id, msg.message_id)
 
 
 @bot.callback_query_handler(func=lambda call: True)
@@ -446,6 +473,23 @@ def handle_callbacks(call):
     if user.id != owner_id:
         bot.answer_callback_query(call.id, "❌ Это не твое меню! Напиши /case чтобы открыть свое.", show_alert=True)
         return
+
+    touch_message(call.message.chat.id, call.message.message_id)
+
+    now_click = time.time()
+    if now_click - LAST_CLICK.get(user.id, 0) < 0.45:
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception:
+            pass
+        return
+    LAST_CLICK[user.id] = now_click
+
+    if action in ("m", "i", "o", "s", "f", "v", "t", "p"):
+        try:
+            bot.answer_callback_query(call.id)
+        except Exception:
+            pass
 
     if action == "m":
         coins, _, _, _ = get_user(user)
