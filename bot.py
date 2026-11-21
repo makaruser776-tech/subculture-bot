@@ -15,11 +15,17 @@ TOKEN = (
 
 bot = telebot.TeleBot(TOKEN, parse_mode="HTML")
 
+DATA_DIR = os.getenv("DATA_DIR", ".")
+os.makedirs(DATA_DIR, exist_ok=True)
+DB_PATH = os.path.join(DATA_DIR, "game.db")
+
 ADMIN_USERNAME = "oi_petersburg"
 START_COINS = 100
 DAILY_BONUS = 60
 DAILY_COOLDOWN = 86400
 WORK_COOLDOWN = 3600
+
+PENDING_GIFTS = {}
 
 WORK_EVENTS = (
     "Помог таскать колонки перед локальным гигом",
@@ -125,13 +131,14 @@ def find_card_info(card_id):
 
 
 def init_db():
-    conn = sqlite3.connect("game.db")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, coins INTEGER, cards TEXT, last_daily INTEGER DEFAULT 0, last_work INTEGER DEFAULT 0)")
-    try:
-        cursor.execute("ALTER TABLE users ADD COLUMN last_work INTEGER DEFAULT 0")
-    except Exception:
-        pass
+    cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT, first_name TEXT, coins INTEGER, cards TEXT, last_daily INTEGER DEFAULT 0, last_work INTEGER DEFAULT 0)")
+    for col in ("username TEXT", "first_name TEXT", "last_work INTEGER DEFAULT 0"):
+        try:
+            cursor.execute(f"ALTER TABLE users ADD COLUMN {col}")
+        except Exception:
+            pass
     conn.commit()
     conn.close()
 
@@ -147,22 +154,24 @@ def is_admin(user):
 
 def get_user(user):
     user_id = user.id
+    uname = (user.username or "").lower()
+    fname = user.first_name or "Игрок"
     admin = is_admin(user)
-    conn = sqlite3.connect("game.db")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("SELECT coins, cards, last_daily, last_work FROM users WHERE user_id = ?", (user_id,))
     row = cursor.fetchone()
     if not row:
         coins = 99999 if admin else START_COINS
-        cursor.execute("INSERT INTO users (user_id, coins, cards, last_daily, last_work) VALUES (?, ?, ?, ?, ?)", (user_id, coins, "{}", 0, 0))
+        cursor.execute("INSERT INTO users (user_id, username, first_name, coins, cards, last_daily, last_work) VALUES (?, ?, ?, ?, ?, ?, ?)", (user_id, uname, fname, coins, "{}", 0, 0))
         conn.commit()
         conn.close()
         return coins, {}, 0, 0
     coins, cards_json, last_daily, last_work = row
     if admin and coins != 99999:
         coins = 99999
-        cursor.execute("UPDATE users SET coins = ? WHERE user_id = ?", (coins, user_id))
-        conn.commit()
+    cursor.execute("UPDATE users SET username = ?, first_name = ?, coins = ? WHERE user_id = ?", (uname, fname, coins, user_id))
+    conn.commit()
     conn.close()
     return coins, json.loads(cards_json), last_daily, (last_work or 0)
 
@@ -170,11 +179,65 @@ def get_user(user):
 def save_user(user, coins, cards, last_daily, last_work):
     if is_admin(user):
         coins = 99999
-    conn = sqlite3.connect("game.db")
+    conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("UPDATE users SET coins = ?, cards = ?, last_daily = ?, last_work = ? WHERE user_id = ?", (coins, json.dumps(cards), last_daily, last_work, user.id))
     conn.commit()
     conn.close()
+
+
+def transfer_card(sender, target_user, target_username, cid):
+    coins, cards, last_daily, last_work = get_user(sender)
+    if cid not in cards or cards[cid] <= 0:
+        return False, "❌ У тебя больше нет этой карточки!"
+
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+
+    if target_user:
+        t_id = target_user.id
+        t_uname = (target_user.username or "").lower()
+        t_fname = target_user.first_name or "Игрок"
+        cursor.execute("SELECT coins, cards FROM users WHERE user_id = ?", (t_id,))
+        row = cursor.fetchone()
+        if not row:
+            t_coins = 99999 if (t_uname == ADMIN_USERNAME) else START_COINS
+            t_cards = {}
+            cursor.execute("INSERT INTO users (user_id, username, first_name, coins, cards, last_daily, last_work) VALUES (?, ?, ?, ?, ?, ?, ?)", (t_id, t_uname, t_fname, t_coins, "{}", 0, 0))
+        else:
+            t_coins, t_cards_json = row
+            t_cards = json.loads(t_cards_json)
+    else:
+        clean_uname = target_username.lstrip("@").lower()
+        cursor.execute("SELECT user_id, first_name, cards FROM users WHERE username = ?", (clean_uname,))
+        row = cursor.fetchone()
+        if not row:
+            conn.close()
+            return False, f"❌ Игрок @{clean_uname} еще ни разу не заходил в бота! Пусть он сначала нажмет /case или ответь (Reply) на любое его сообщение."
+        t_id, t_fname, t_cards_json = row
+        t_cards = json.loads(t_cards_json)
+
+    if t_id == sender.id:
+        conn.close()
+        return False, "❌ Нельзя передать карточку самому себе!"
+
+    if cards[cid] > 1:
+        cards[cid] -= 1
+    else:
+        del cards[cid]
+
+    t_cards[cid] = t_cards.get(cid, 0) + 1
+
+    if is_admin(sender):
+        coins = 99999
+
+    cursor.execute("UPDATE users SET coins = ?, cards = ? WHERE user_id = ?", (coins, json.dumps(cards), sender.id))
+    cursor.execute("UPDATE users SET cards = ? WHERE user_id = ?", (json.dumps(t_cards), t_id))
+    conn.commit()
+    conn.close()
+
+    _, card_name = find_card_info(cid)
+    return True, f"🎁 Карточка <b>«{card_name}»</b> успешно передана игроку <b>{t_fname}</b>!"
 def get_menu_text(name, coins):
     return (
         f"🎲 <b>Кейсы субкультур</b> | {name}\n"
@@ -235,12 +298,41 @@ def back_kb(user_id):
 
 def shelf_kb(user_id):
     kb = InlineKeyboardMarkup()
-    kb.row(InlineKeyboardButton("🏷 Поставить тег в чате", callback_data=f"t|0|{user_id}"))
+    kb.row(
+        InlineKeyboardButton("🏷 Тег в чате", callback_data=f"t|0|{user_id}"),
+        InlineKeyboardButton("🎁 Передать карту", callback_data=f"f|0|{user_id}"),
+    )
     kb.row(
         InlineKeyboardButton("♻️ Продать дубли", callback_data=f"x|{user_id}"),
         InlineKeyboardButton("💸 Продать карту", callback_data=f"p|0|{user_id}"),
     )
     kb.row(InlineKeyboardButton("🔙 Назад в меню", callback_data=f"m|{user_id}"))
+    return kb
+
+
+def gift_list_kb(cards, page, user_id):
+    kb = InlineKeyboardMarkup()
+    owned_ids = list(cards.keys())
+    per_page = 6
+    total_pages = max(1, (len(owned_ids) + per_page - 1) // per_page)
+    page = max(0, min(page, total_pages - 1))
+
+    chunk = owned_ids[page * per_page : (page + 1) * per_page]
+    for cid in chunk:
+        rarity, name = find_card_info(cid)
+        emoji = RARITY_EMOJI[rarity]
+        count = cards[cid]
+        kb.row(InlineKeyboardButton(f"{emoji} {name} (x{count})", callback_data=f"v|{cid}|{user_id}"))
+
+    nav = list()
+    if page > 0:
+        nav.append(InlineKeyboardButton("⬅️", callback_data=f"f|{page - 1}|{user_id}"))
+    if page < total_pages - 1:
+        nav.append(InlineKeyboardButton("➡️", callback_data=f"f|{page + 1}|{user_id}"))
+    if nav:
+        kb.row(*nav)
+
+    kb.row(InlineKeyboardButton("🔙 В шкаф", callback_data=f"s|{user_id}"))
     return kb
 
 
@@ -316,6 +408,34 @@ def cmd_rich(message):
         bot.reply_to(message, "💰 Админ-баланс: <b>99999 🪙</b>")
 
 
+@bot.message_handler(func=lambda m: m.from_user and m.from_user.id in PENDING_GIFTS)
+def handle_gift_target(message):
+    sender = message.from_user
+    cid = PENDING_GIFTS.pop(sender.id)
+
+    target_user = None
+    target_username = None
+
+    if message.reply_to_message and message.reply_to_message.from_user:
+        target_user = message.reply_to_message.from_user
+    elif message.text and "@" in message.text:
+        for word in message.text.split():
+            if word.startswith("@") and len(word) > 1:
+                target_username = word
+                break
+
+    if not target_user and not target_username:
+        bot.reply_to(message, "❌ Передача отменена. Нужно было отправить <code>@username</code> друга или ответить (Reply) на его сообщение.")
+        return
+
+    if target_user and target_user.is_bot:
+        bot.reply_to(message, "❌ Ботам нельзя дарить карточки!")
+        return
+
+    _, res_text = transfer_card(sender, target_user, target_username, cid)
+    bot.reply_to(message, res_text)
+
+
 @bot.callback_query_handler(func=lambda call: True)
 def handle_callbacks(call):
     parts = call.data.split("|")
@@ -370,7 +490,6 @@ def handle_callbacks(call):
             message_id=call.message.message_id,
             reply_markup=after_open_kb(case_key, owner_id),
         )
-
     elif action == "s":
         coins, cards, _, _ = get_user(user)
         total_cards = sum(len(group) for group in CARDS.values())
@@ -393,6 +512,38 @@ def handle_callbacks(call):
                     lines.append(f"{emoji} <b>{rarity}:</b> " + ", ".join(opened_in_rarity))
 
         bot.edit_message_text("\n".join(lines), chat_id=call.message.chat.id, message_id=call.message.message_id, reply_markup=shelf_kb(owner_id))
+
+    elif action == "f":
+        page = int(parts.pop(0))
+        _, cards, _, _ = get_user(user)
+        if not cards:
+            bot.answer_callback_query(call.id, "🗄 В шкафу пока нет ни одной карточки!", show_alert=True)
+            return
+
+        bot.edit_message_text(
+            "🎁 <b>Передача карточки другу</b>\n<i>Выбери карточку из шкафа, которую хочешь подарить:</i>",
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            reply_markup=gift_list_kb(cards, page, owner_id),
+        )
+
+    elif action == "v":
+        cid = parts.pop(0)
+        _, cards, _, _ = get_user(user)
+        if cid not in cards or cards[cid] <= 0:
+            bot.answer_callback_query(call.id, "❌ Эта карточка уже не в шкафу!", show_alert=True)
+            return
+
+        _, name = find_card_info(cid)
+        PENDING_GIFTS[user.id] = cid
+        bot.edit_message_text(
+            f"🎁 Выбрана карта: <b>{name}</b>\n\n"
+            f"Теперь просто напиши в чат <code>@username</code> получателя или <b>ответь (Reply)</b> на любое его сообщение!",
+            chat_id=call.message.chat.id,
+            message_id=call.message.message_id,
+            reply_markup=back_kb(owner_id),
+        )
+
     elif action == "t":
         page = int(parts.pop(0))
         _, cards, _, _ = get_user(user)
